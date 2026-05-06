@@ -166,21 +166,40 @@ namespace RiivolutionIsoBuilder
 				return false;
 			}
 
-			int highestSection = getHighestSection();
+			// Find the correct insertion point in the file: right after the last section
+			// (by file end position) whose memory address is strictly less than 'offset'.
+			// This keeps every newly-created section in memory-address order within the
+			// file, which is required for mergeSectionsThatCanBeMerged to produce a
+			// correct merged section (file-contiguous == memory-contiguous).
+			// The minimum is 0xE4 (right after the DOL header).
+			uint insertionPoint = 0xE4;
+			for (int si = 0; si < realPointers.Count; si++)
+			{
+				if (sectionSizes[si] == 0 || dolOffsets[si] == 0) continue;
+				if (realPointers[si] < offset)
+				{
+					uint sectionFileEnd = dolOffsets[si] + sectionSizes[si];
+					if (sectionFileEnd > insertionPoint)
+						insertionPoint = sectionFileEnd;
+				}
+			}
 
-			byte[] previousSections = dol.Take((int)(dolOffsets[highestSection] + sectionSizes[highestSection])).ToArray();
-			byte[] footer = dol.Skip((int)(dolOffsets[highestSection] + sectionSizes[highestSection])).ToArray();
-			dol = previousSections.Concat(value).Concat(footer).ToArray();
-			dolOffsets[newSectionIndex] = dolOffsets[highestSection] + sectionSizes[highestSection];
+			// Insert new section data at insertionPoint, shifting everything after it.
+			byte[] before = dol.Take((int)insertionPoint).ToArray();
+			byte[] after = dol.Skip((int)insertionPoint).ToArray();
+			dol = before.Concat(value).Concat(after).ToArray();
+
+			// All sections whose file data begins at or after insertionPoint must have
+			// their file offset bumped forward by the size of the new data.
+			for (int si = 0; si < dolOffsets.Count; si++)
+			{
+				if (dolOffsets[si] != 0 && dolOffsets[si] >= insertionPoint)
+					dolOffsets[si] += (uint)value.Length;
+			}
+
+			dolOffsets[newSectionIndex] = insertionPoint;
 			realPointers[newSectionIndex] = offset;
 			sectionSizes[newSectionIndex] = (uint)value.Length;
-
-			for (int i = 0; i < 4; i++)
-			{
-				dol[4 * newSectionIndex + i] = Convert.ToByte(dolOffsets[newSectionIndex].ToString("X8").Substring(i * 2, 2), 16);
-				dol[4 * newSectionIndex + i + 0x48] = Convert.ToByte(realPointers[newSectionIndex].ToString("X8").Substring(i * 2, 2), 16);
-				dol[4 * newSectionIndex + i + 0x90] = Convert.ToByte(sectionSizes[newSectionIndex].ToString("X8").Substring(i * 2, 2), 16);
-			}
 
 			newSectionsIndexes.Add(newSectionIndex);
 
@@ -243,7 +262,8 @@ namespace RiivolutionIsoBuilder
 					{
 						continue;
 					}
-					if (realPointers[newSection] + sectionSizes[newSection] == realPointers[otherSection])
+					if (realPointers[newSection] + sectionSizes[newSection] == realPointers[otherSection]
+					&& dolOffsets[newSection] + sectionSizes[newSection] == dolOffsets[otherSection])
 					{
 						sectionSizes[newSection] += sectionSizes[otherSection];
 						dolOffsets[otherSection] = 0;
