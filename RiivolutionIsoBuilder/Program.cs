@@ -414,6 +414,8 @@ namespace RiivolutionIsoBuilder
 
             Dolpatcher dp = new Dolpatcher(extDir + "\\sys\\main.dol", isSilent);
 
+            string[] sysFiles = { "\\main.dol", "\\bi2.bin", "\\apploader.img" };
+
             System.Diagnostics.Process copy = new System.Diagnostics.Process();
             copy.StartInfo.FileName = "cmd.exe";
             copy.StartInfo.UseShellExecute = false;
@@ -433,7 +435,9 @@ namespace RiivolutionIsoBuilder
                     doStringTIDReplacements(ref filePatch.external);
 
                     string file = rootPath + patch.root + "\\" + filePatch.external;
-                    string extPath = extDir + "\\files" + filePatch.disc;
+                    string extPath = sysFiles.Any(s => filePatch.disc.Equals(s, StringComparison.OrdinalIgnoreCase))
+                        ? extDir + "\\sys" + filePatch.disc
+                        : extDir + "\\files" + filePatch.disc;
                     //Console.WriteLine("Copying " + path + " to " + extPath);
 
                     if ((filePatch.disc == null || filePatch.disc == "") ? true : filePatch.create) // Avoid running useless copy commands for files that don't exist AND don't have the "created" flag enabled.
