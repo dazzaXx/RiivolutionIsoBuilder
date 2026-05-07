@@ -378,7 +378,7 @@ namespace RiivolutionIsoBuilder
                             memory.offset += 0x80000000;
                         }
 
-                        if(memory.offset < 0x80004000)
+                        if(memory.offset < 0x80004000 && string.IsNullOrEmpty(memory.valueFile))
                         {
                             disc.badMemPatches = true;
                         }
