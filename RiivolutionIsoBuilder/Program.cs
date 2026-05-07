@@ -326,7 +326,7 @@ namespace RiivolutionIsoBuilder
                                 {
                                     choosed = Convert.ToInt32(Console.ReadLine());
                                 }
-                                catch (Exception e)
+                                catch (Exception)
                                 {
                                     Console.WriteLine("That's not a number!");
                                     continue;

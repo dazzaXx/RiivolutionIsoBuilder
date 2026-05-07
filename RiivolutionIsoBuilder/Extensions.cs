@@ -29,7 +29,7 @@ namespace ExtensionMethods
                 {
                     result = Convert.ToUInt32(s);
                 }
-                catch (Exception e)
+                catch (Exception)
                 {
                     try
                     {
@@ -38,7 +38,7 @@ namespace ExtensionMethods
 
                         result = Convert.ToUInt32(s, 16);
                     }
-                    catch (Exception ee)
+                    catch (Exception)
                     {
                         Console.WriteLine("Number " + s + " isn't base 10 nor 16");
                     }
@@ -77,7 +77,7 @@ namespace ExtensionMethods
                 {
                     tmp = Convert.ToByte(s.Substring(0, 2), 16);
                 }
-                catch (Exception e)
+                catch (Exception)
                 {
                     Console.WriteLine("Invalid Hex Number " + s);
                     return new List<byte>();
