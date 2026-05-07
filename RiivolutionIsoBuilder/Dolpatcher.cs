@@ -278,8 +278,18 @@ namespace RiivolutionIsoBuilder
 			int highestSection = getHighestSection();
 			uint fileEnd = dolOffsets[highestSection] + sectionSizes[highestSection];
 
-			// Find highest virtual address end to determine safe virtual address
+			// Read BSS info from DOL header to avoid the middleman landing inside the
+			// BSS region, which the DOL loader zeroes AFTER copying all sections to RAM.
+			// DOL header: 0xD8 = BSS virtual address, 0xDC = BSS size (both big-endian).
+			uint bssAddr = BitConverter.ToUInt32(dol.Skip(0xD8).Take(4).Reverse().ToArray(), 0);
+			uint bssSize = BitConverter.ToUInt32(dol.Skip(0xDC).Take(4).Reverse().ToArray(), 0);
+			uint bssEnd = (bssAddr > 0 && bssSize > 0) ? (bssAddr + bssSize) : 0;
+
+			// Find highest virtual address end to determine safe virtual address,
+			// taking BSS end into account so the middleman isn't zeroed on load.
 			uint newVirtualAddr = getHighestVirtualEnd();
+			if (bssEnd > newVirtualAddr)
+				newVirtualAddr = bssEnd;
 			if (newVirtualAddr < 0x80004000)
 				newVirtualAddr = 0x80004000;
 			if (newVirtualAddr % 0x20 != 0)
