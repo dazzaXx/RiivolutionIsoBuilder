@@ -19,6 +19,9 @@ namespace RiivolutionIsoBuilder
 		string dolPath = "";
 		bool isSilent;
 
+		uint originalEntryPoint;
+		List<(uint addr, byte[] value)> pendingLowMemPatches = new List<(uint, byte[])>();
+
 
 		public Dolpatcher(string dolPath, bool isSilent)
         {
@@ -32,6 +35,8 @@ namespace RiivolutionIsoBuilder
                 sectionSizes.Add(BitConverter.ToUInt32(dol.Skip(i + 0x90).Take(4).Reverse().ToArray(), 0));
             }
 
+			originalEntryPoint = BitConverter.ToUInt32(dol.Skip(0xE0).Take(4).Reverse().ToArray(), 0);
+
 			this.dolPath = dolPath;
 			this.isSilent = isSilent;
 		}
@@ -44,9 +49,11 @@ namespace RiivolutionIsoBuilder
 
         public bool doMemoryPatch(uint offset, byte[] value, byte[] original)
         {
-			if(offset < 0x80004000)
+			if (offset < 0x80004000)
 			{
-				Console.WriteLine("WARNING: This patch is being applied to 0x" + offset.ToString("X8") + ", which can break compatibility with USB Loaders.");
+				if (!isSilent) Console.WriteLine("Queuing low-memory patch at 0x" + offset.ToString("X8") + " for middleman injection.");
+				pendingLowMemPatches.Add((offset, value));
+				return true;
 			}
 
 			uint dolOffs = getOffsetFromPointer(offset);
@@ -187,6 +194,164 @@ namespace RiivolutionIsoBuilder
 			}
 			reencodeDolHeader();
 			return didMerged;
+		}
+
+		public bool buildAndInjectMiddleman()
+		{
+			if (pendingLowMemPatches.Count == 0)
+				return false;
+
+			if (!isSilent) Console.WriteLine("Building middleman DOL section for " + pendingLowMemPatches.Count + " low-memory patch(es)...");
+
+			List<uint> instructions = new List<uint>();
+
+			foreach (var patch in pendingLowMemPatches)
+			{
+				uint currentAddr = patch.addr;
+				byte[] value = patch.value;
+				int remaining = value.Length;
+				int valueOffset = 0;
+
+				while (remaining >= 4)
+				{
+					uint wordVal = ((uint)value[valueOffset] << 24) |
+					               ((uint)value[valueOffset + 1] << 16) |
+					               ((uint)value[valueOffset + 2] << 8) |
+					               (uint)value[valueOffset + 3];
+
+					emitLoadAddressAndValue(instructions, currentAddr, wordVal);
+					instructions.Add(0x90830000); // stw r4, 0(r3)
+					emitCacheFlush(instructions);
+
+					currentAddr += 4;
+					valueOffset += 4;
+					remaining -= 4;
+				}
+
+				if (remaining >= 2)
+				{
+					uint halfVal = ((uint)value[valueOffset] << 8) | (uint)value[valueOffset + 1];
+
+					emitLoadAddressAndValue(instructions, currentAddr, halfVal);
+					instructions.Add(0xB0830000); // sth r4, 0(r3)
+					emitCacheFlush(instructions);
+
+					currentAddr += 2;
+					valueOffset += 2;
+					remaining -= 2;
+				}
+
+				if (remaining == 1)
+				{
+					uint byteVal = (uint)value[valueOffset];
+
+					emitLoadAddressAndValue(instructions, currentAddr, byteVal);
+					instructions.Add(0x98830000); // stb r4, 0(r3)
+					emitCacheFlush(instructions);
+				}
+			}
+
+			// Jump to original entry point
+			instructions.Add(0x3C600000 | ((originalEntryPoint >> 16) & 0xFFFF)); // lis r3, hi(origEntry)
+			instructions.Add(0x60630000 | (originalEntryPoint & 0xFFFF));          // ori r3, r3, lo(origEntry)
+			instructions.Add(0x7C6903A6);                                           // mtctr r3
+			instructions.Add(0x4E800420);                                           // bctr
+
+			// Convert to big-endian byte array
+			byte[] middlemanCode = new byte[instructions.Count * 4];
+			for (int i = 0; i < instructions.Count; i++)
+			{
+				middlemanCode[i * 4 + 0] = (byte)((instructions[i] >> 24) & 0xFF);
+				middlemanCode[i * 4 + 1] = (byte)((instructions[i] >> 16) & 0xFF);
+				middlemanCode[i * 4 + 2] = (byte)((instructions[i] >> 8) & 0xFF);
+				middlemanCode[i * 4 + 3] = (byte)(instructions[i] & 0xFF);
+			}
+
+			// Get a free section slot
+			int newSectionIndex = getNextEmptySection();
+			if (newSectionIndex < 0)
+			{
+				Console.WriteLine("Can't inject middleman: No free DOL section slot available.");
+				return false;
+			}
+
+			// Find highest section in the file to determine append position
+			int highestSection = getHighestSection();
+			uint fileEnd = dolOffsets[highestSection] + sectionSizes[highestSection];
+
+			// Find highest virtual address end to determine safe virtual address
+			uint newVirtualAddr = getHighestVirtualEnd();
+			if (newVirtualAddr < 0x80004000)
+				newVirtualAddr = 0x80004000;
+			if (newVirtualAddr % 0x20 != 0)
+				newVirtualAddr = (newVirtualAddr / 0x20 + 1) * 0x20;
+
+			// Align DOL file offset to 0x20
+			uint newDolOffset = fileEnd;
+			if (newDolOffset % 0x20 != 0)
+				newDolOffset = (newDolOffset / 0x20 + 1) * 0x20;
+
+			// Extend DOL: existing content + alignment padding + middleman code
+			int paddingSize = (int)(newDolOffset - fileEnd);
+			byte[] previousContent = dol.Take((int)fileEnd).ToArray();
+			byte[] footer = dol.Skip((int)fileEnd).ToArray();
+			byte[] padding = new byte[paddingSize];
+
+			dol = previousContent.Concat(padding).Concat(middlemanCode).Concat(footer).ToArray();
+
+			dolOffsets[newSectionIndex] = newDolOffset;
+			realPointers[newSectionIndex] = newVirtualAddr;
+			sectionSizes[newSectionIndex] = (uint)middlemanCode.Length;
+
+			newSectionsIndexes.Add(newSectionIndex);
+
+			reencodeDolHeader();
+
+			// Update entry point to point to middleman
+			dol[0xE0] = (byte)((newVirtualAddr >> 24) & 0xFF);
+			dol[0xE1] = (byte)((newVirtualAddr >> 16) & 0xFF);
+			dol[0xE2] = (byte)((newVirtualAddr >> 8) & 0xFF);
+			dol[0xE3] = (byte)(newVirtualAddr & 0xFF);
+
+			if (!isSilent) Console.WriteLine("Middleman injected at virtual address 0x" + newVirtualAddr.ToString("X8") + " (original entry point: 0x" + originalEntryPoint.ToString("X8") + ").");
+
+			if (mergeSectionsThatCanBeMerged())
+			{
+				if (!isSilent) Console.WriteLine("Merged sections that could be merged.");
+			}
+
+			return true;
+		}
+
+		private uint getHighestVirtualEnd()
+		{
+			uint highestEnd = 0;
+			for (int i = 0; i < realPointers.Count; i++)
+			{
+				if (sectionSizes[i] > 0)
+				{
+					uint end = realPointers[i] + sectionSizes[i];
+					if (end > highestEnd)
+						highestEnd = end;
+				}
+			}
+			return highestEnd;
+		}
+
+		private void emitLoadAddressAndValue(List<uint> instructions, uint addr, uint val)
+		{
+			instructions.Add(0x3C600000 | ((addr >> 16) & 0xFFFF)); // lis r3, hi(addr)
+			instructions.Add(0x60630000 | (addr & 0xFFFF));          // ori r3, r3, lo(addr)
+			instructions.Add(0x3C800000 | ((val >> 16) & 0xFFFF));   // lis r4, hi(val)
+			instructions.Add(0x60840000 | (val & 0xFFFF));            // ori r4, r4, lo(val)
+		}
+
+		private void emitCacheFlush(List<uint> instructions)
+		{
+			instructions.Add(0x7C001866); // dcbst 0, r3
+			instructions.Add(0x7C0004AC); // sync
+			instructions.Add(0x7C001FAC); // icbi 0, r3
+			instructions.Add(0x4C00012C); // isync
 		}
 
 		public void reencodeDolHeader()

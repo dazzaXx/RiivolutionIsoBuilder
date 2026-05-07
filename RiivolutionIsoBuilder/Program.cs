@@ -558,6 +558,8 @@ namespace RiivolutionIsoBuilder
                 }
             }
 
+            dp.buildAndInjectMiddleman();
+
             if (!skipAllDone)
             {
                 if (disc.hasSaveGamePatches)
@@ -566,14 +568,6 @@ namespace RiivolutionIsoBuilder
                         "This isn't a problem for most mods, but by default the same save slot as the game you're modding will be used for the mod you're trying to build.\r\n" +
                         "THIS PROBLEM CAN BE AVOIDED BY CHANGING THE TITLEID OF YOUR MOD, SEE HELP PAGE (-h or --help) FOR MORE INFO\r\n\r\n" +
                         "However, some mods use this kind of patch to have the default save file changed."/*" If this is your case, ask for support on discord at Asu-chan#2929"*/, "Memory Patches Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
-
-                if (disc.badMemPatches)
-                {
-                    MessageBox.Show("WARNING: Due to some memory patches being applied under 0x80004000, your game may not work on USB Loaders.\r\n\r\n" +
-                        "This does NOT necessarely mean that any error occured; If you play your patched rom on Dolphin Emulator you should be fine.\r\n\r\n" +
-                        "A fix for this is planned, but it's no easy task so don't expect it to see the light of the day too quickly.\r\n\r\n" +
-                        "If you can, ask your mod's maker to put their code hacks in a different place.", "Memory Patches Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
             }
 
