@@ -112,7 +112,7 @@ namespace RiivolutionIsoBuilder
 
 						return true;
 					}
-					catch(Exception e)
+					catch(Exception)
 					{
 						Console.WriteLine("Patch " + offset.ToString("X8") + " starts within the DOL range but ends out of it");
 						return false;
