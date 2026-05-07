@@ -252,8 +252,7 @@ namespace RiivolutionIsoBuilder
 			}
 
 			// Jump to original entry point
-			instructions.Add(0x3C600000 | ((originalEntryPoint >> 16) & 0xFFFF)); // lis r3, hi(origEntry)
-			instructions.Add(0x60630000 | (originalEntryPoint & 0xFFFF));          // ori r3, r3, lo(origEntry)
+			emitLoadR3(instructions, originalEntryPoint);
 			instructions.Add(0x7C6903A6);                                           // mtctr r3
 			instructions.Add(0x4E800420);                                           // bctr
 
@@ -338,10 +337,15 @@ namespace RiivolutionIsoBuilder
 			return highestEnd;
 		}
 
-		private void emitLoadAddressAndValue(List<uint> instructions, uint addr, uint val)
+		private void emitLoadR3(List<uint> instructions, uint addr)
 		{
 			instructions.Add(0x3C600000 | ((addr >> 16) & 0xFFFF)); // lis r3, hi(addr)
 			instructions.Add(0x60630000 | (addr & 0xFFFF));          // ori r3, r3, lo(addr)
+		}
+
+		private void emitLoadAddressAndValue(List<uint> instructions, uint addr, uint val)
+		{
+			emitLoadR3(instructions, addr);
 			instructions.Add(0x3C800000 | ((val >> 16) & 0xFFFF));   // lis r4, hi(val)
 			instructions.Add(0x60840000 | (val & 0xFFFF));            // ori r4, r4, lo(val)
 		}
